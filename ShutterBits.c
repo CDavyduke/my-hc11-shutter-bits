@@ -223,6 +223,7 @@ static void display_time (unsigned long ntime)
   unsigned long nus;
   char buf[12];
   char buf2[32];
+  char buf3[32];
 
   static unsigned long last_sec = 0xffffffff;
   static unsigned long last_us = 0;
@@ -231,54 +232,60 @@ static void display_time (unsigned long ntime)
   seconds = timer_seconds (ntime);
   nus = timer_microseconds (ntime);
           
+  sprintf (buf3, "s=%ld, nus=%ld", seconds, nus);
+
   nus = nus / 100000L;
 
   /* If the seconds changed, re-display everything.  */
   if (seconds != last_sec)
   {
-      last_sec = seconds;
-      last_us = nus;
-      hours = (unsigned short) (seconds / 3600L);
-      mins = (unsigned short) (seconds % 3600L);
-      seconds = (unsigned long) (mins % 60);
-      mins = mins / 60;
-      buf[0] = '0' + (hours / 10);
-      buf[1] = '0' + (hours % 10);
-      buf[2] = ':';
-      buf[3] = '0' + (mins / 10);
-      buf[4] = '0' + (mins % 10);
-      buf[5] = ':';
-      buf[6] = '0' + (seconds / 10);
-      buf[7] = '0' + (seconds % 10);
-      buf[8] = '.';
-      buf[9] = '0' + nus;
-      buf[10] = 0;
-      serial_print ("\r");
-      serial_print (buf);
+    last_sec = seconds;
+    last_us = nus;
+    hours = (unsigned short) (seconds / 3600L);
+    mins = (unsigned short) (seconds % 3600L);
+    seconds = (unsigned long) (mins % 60);
+    mins = mins / 60;
+    buf[0] = '0' + (hours / 10);
+    buf[1] = '0' + (hours % 10);
+    buf[2] = ':';
+    buf[3] = '0' + (mins / 10);
+    buf[4] = '0' + (mins % 10);
+    buf[5] = ':';
+    buf[6] = '0' + (seconds / 10);
+    buf[7] = '0' + (seconds % 10);
+    buf[8] = '.';
+    buf[9] = '0' + nus;
+    buf[10] = 0;
+    serial_print ("\r");
+    serial_print (buf);
 	  
 	  if (shutter_open)
 	  {
-		// Open the shutter.
-        _io_ports[M6811_PORTA] |= PA5;
-		_io_ports[M6811_PORTA] &= ~PA4;
-	    shutter_open = 0;
+      // Open the shutter.
+      _io_ports[M6811_PORTA] |= PA5;
+      _io_ports[M6811_PORTA] &= ~PA4;
+      shutter_open = 0;
 	  }
 	  else
 	  {
-		// Close the shutter.
-        _io_ports[M6811_PORTA] |= PA4;
-		_io_ports[M6811_PORTA] &= ~PA5;
+      // Close the shutter.
+      _io_ports[M6811_PORTA] |= PA4;
+      _io_ports[M6811_PORTA] &= ~PA5;
 	    shutter_open = 1;
 	  }
 
-      // Write the time out to the LCD display.
-      LCD_Command(LINE_2);               // goto lcd line 2
-      LCDprint(buf);
+    // Write the time out to the LCD display.
+    LCD_Command(LINE_2);               // goto lcd line 2
+    LCDprint(buf);
 
-      // Write the timer count out to the LCD display for diagnostic purposes.
-      sprintf (buf2, "%ld", timer_count);
-      LCD_Command(LINE_3);               // goto lcd line 3
-      LCDprint(buf2);
+    // Write the timer count out to the LCD display for diagnostic purposes.
+    sprintf (buf2, "%ld", timer_count);
+    LCD_Command(LINE_3);               // goto lcd line 3
+    LCDprint(buf2);
+
+    // Write the number of microseconds out to the LCD display for diagnostic purposes.
+    LCD_Command(LINE_4);               // goto lcd line 4
+    LCDprint(buf3);
   }
 
   /* Only re-display the tens of a second.  */
