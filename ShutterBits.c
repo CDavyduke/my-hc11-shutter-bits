@@ -80,6 +80,8 @@ struct interrupt_vectors __attribute__((section(".vectors"))) vectors =
 unsigned long timer_count;
 unsigned long boot_time;
 
+unsigned short shutter_open;
+
 void LCD_Command(unsigned char cval);
 void LCD_busy(void);
 void cprint(char dval);
@@ -253,9 +255,21 @@ static void display_time (unsigned long ntime)
       buf[10] = 0;
       serial_print ("\r");
       serial_print (buf);
-
-      // Toggle the LED, giving a "heart-beat" of sorts.
-      _io_ports[M6811_PORTA] ^= PA5;
+	  
+	  if (shutter_open)
+	  {
+		// Open the shutter.
+        _io_ports[M6811_PORTA] |= PA5;
+		_io_ports[M6811_PORTA] &= ~PA4;
+	    shutter_open = 0;
+	  }
+	  else
+	  {
+		// Close the shutter.
+        _io_ports[M6811_PORTA] |= PA4;
+		_io_ports[M6811_PORTA] &= ~PA5;
+	    shutter_open = 1;
+	  }
 
       // Write the time out to the LCD display.
       LCD_Command(LINE_2);               // goto lcd line 2
@@ -345,6 +359,8 @@ int main ()
 
   /* Ask for the boot time.  */
   get_time ();
+  
+  shutter_open = 1;
 
   /* Loop waiting for the time to change and redisplay it.  */
   while (1)
