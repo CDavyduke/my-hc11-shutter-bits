@@ -21,7 +21,7 @@
    used here to ensure correct association of the handler in the struct.
    This is why the order of handlers declared below does not follow
    the HC11 order.  */
-struct interrupt_vectors __attribute__((section(".vectors"))) vectors = 
+struct interrupt_vectors __attribute__((section(".vectors"))) vectors =
 {
   res0_handler:           fatal_interrupt, /* res0 */
   res1_handler:           fatal_interrupt,
@@ -64,9 +64,15 @@ struct interrupt_vectors __attribute__((section(".vectors"))) vectors =
 #define TIMER_DIV  (8192L)
 #define TIMER_TICK (M6811_CPU_E_CLOCK / TIMER_DIV)
 
-// BIT 4 and 5 on PORTA are for the H-bridge driver of the shutter.
+// Define the bits for Port A.
+#define PA0 (1<<0)
+#define PA1 (1<<1)
+#define PA2 (1<<2)
+#define PA3 (1<<3)
 #define PA4 (1<<4)
 #define PA5 (1<<5)
+#define PA6 (1<<6)
+#define PA7 (1<<7)
 
 #define LINE_1      0x80                // beginning position of LCD line 1
 #define LINE_2      0xC0                // beginning position of LCD line 2
@@ -80,7 +86,13 @@ struct interrupt_vectors __attribute__((section(".vectors"))) vectors =
 unsigned long timer_count;
 unsigned long boot_time;
 
+// Some shutter-related variables
+unsigned short cycle_start;
+unsigned short cycle_stop;
+unsigned short shutter_cycle;
 unsigned short shutter_open;
+unsigned short shutter_close;
+unsigned short spare_button;
 unsigned short on_count;
 unsigned short off_count;
 
@@ -89,6 +101,8 @@ void LCD_busy(void);
 void cprint(char dval);
 void LCDprint(char *sptr);
 void LCD_Initialize(void);
+
+unsigned short ButtonPressed(void);
 
 /* Timer interrupt handler.  */
 void __attribute__((interrupt)) timer_interrupt (void)
@@ -140,11 +154,11 @@ static unsigned short get_value (char **p)
 {
   char *q;
   unsigned short val;
-  
+
   q = *p;
   while (*q == ' ')
     q++;
-  
+
   val = 0;
   while (1)
   {
@@ -167,7 +181,7 @@ static void get_time ()
   unsigned short hours, mins, secs;
   char *p;
   int error = 0;
-  
+
   print ("\r\nBoot time ? ");
   pos = 0;
   while (1)
@@ -214,7 +228,7 @@ static void get_time ()
   {
     print ("Invalid boot time.\r\n");
     print ("Format is: HH:MM:SS\r\n");
-  } 
+  }
 }
 
 /* Display the current time on the serial line.  */
@@ -223,9 +237,9 @@ static void display_time (unsigned long ntime)
   unsigned long seconds;
   unsigned short hours, mins;
   unsigned long nus;
-  char buf[12];
-  char buf2[32];
-  char buf3[32];
+  char buf[20];
+  char buf2[20];
+//  char buf3[20];
 
   static unsigned long last_sec = 0xffffffff;
   static unsigned long last_us = 0;
@@ -233,8 +247,8 @@ static void display_time (unsigned long ntime)
   /* Translate the number of ticks in seconds and milliseconds.  */
   seconds = timer_seconds (ntime);
   nus = timer_microseconds (ntime);
-          
-  sprintf (buf3, "s=%ld, nus=%ld", seconds, nus);
+
+  sprintf (buf2, "t=%ld, %ld, %ld", timer_count, nus, seconds);
 
   nus = nus / 100000L;
 
@@ -260,32 +274,37 @@ static void display_time (unsigned long ntime)
     buf[10] = 0;
     serial_print ("\r");
     serial_print (buf);
-	  
-	  if (shutter_open)
+
+    // If shutter cycling is enabled, we will need to automatically
+    // toggle the shutter opened and closed.
+	  if(shutter_cycle)
 	  {
-      // If the shutter is opened, close the shutter.
-      shutter_open = 0;
-      off_count = 0;
-	  }
-	  else
-	  {
-      // Otherwise, open the shutter.
-	    shutter_open = 1;
-      on_count = 0;
+      if (shutter_open)
+      {
+        // If the shutter is opened, close the shutter.
+        shutter_open = 0;
+        off_count = 0;
+      }
+      else
+      {
+        // Otherwise, open the shutter.
+        shutter_open = 1;
+        on_count = 0;
+      }
 	  }
 
     // Write the time out to the LCD display.
     LCD_Command(LINE_2);               // goto lcd line 2
     LCDprint(buf);
 
-    // Write the timer count out to the LCD display for diagnostic purposes.
-    sprintf (buf2, "%ld", timer_count);
+    // Write the timer count, microseconds, and seconds
+    // out to the LCD display for diagnostic purposes.
     LCD_Command(LINE_3);               // goto lcd line 3
     LCDprint(buf2);
 
     // Write the number of microseconds out to the LCD display for diagnostic purposes.
-    LCD_Command(LINE_4);               // goto lcd line 4
-    LCDprint(buf3);
+//    LCD_Command(LINE_4);               // goto lcd line 4
+//    LCDprint(buf3);
   }
 
   /* Only re-display the tens of a second.  */
@@ -296,9 +315,11 @@ static void display_time (unsigned long ntime)
     buf[1] = 0;
     serial_print ("\b");
     serial_print (buf);
-    
+
 	  if (shutter_open)
 	  {
+      off_count = 0;
+
       if (on_count < 1)
       {
         // Open the shutter.
@@ -313,8 +334,10 @@ static void display_time (unsigned long ntime)
       }
       on_count++;
     }
-    else
+    else if (shutter_close)
     {
+      on_count = 0;
+
       if (off_count < 1)
       {
         // Close the shutter.
@@ -371,10 +394,21 @@ void LCDprint(char *sptr)
 	}
 }
 
+// returns 1 if a key is pressed.
+// the key value/index is stored in the global variable NewKey.
+unsigned short ButtonPressed(void)
+{
+  unsigned short buttons = 0;
+  buttons = _io_ports[M6811_PORTA] & 0x0F;
+  return buttons;
+}
+
 int main ()
 {
   unsigned long prev_time;
-  
+  unsigned short buttons = 0;
+  char buf[8];
+
   serial_init ();
   lock ();
   boot_time = 0;
@@ -393,12 +427,17 @@ int main ()
   LCD_Initialize();
 
   // Print the "welcome" message out the serial port and on the LCD.
-  print ("\nHello, world!\n");
-  LCD_Command(LINE_1);               // goto lcd line 1
-  LCDprint("Hello, world!");
+//  print ("\nHello, world!\n");
+//  LCD_Command(LINE_1);               // goto lcd line 1
+//  LCDprint("Hello, world!");
 
   // Open the shutter to start with and initialize the counters to zero.
-  shutter_open = 1;
+  cycle_start = 0;
+  cycle_stop = 0;
+  shutter_cycle = 0;
+  shutter_open = 0;
+  shutter_close = 0;
+  spare_button = 0;
   on_count = 0;
   off_count = 0;
 
@@ -414,6 +453,33 @@ int main ()
        ask for the boot time again.  */
     if (serial_receive_pending ())
       get_time ();
+
+    buttons = ButtonPressed();
+
+    if( buttons )
+    {
+      shutter_open = buttons & PA0;
+      shutter_close = buttons & PA1;
+      cycle_start = buttons & PA2;
+      cycle_stop = buttons & PA3;
+      spare_button = buttons & PA7;
+
+      if(cycle_start)
+      {
+        if(shutter_cycle)
+        {
+          shutter_cycle = 0;
+        }
+        else
+        {
+          shutter_cycle = 1;
+        }
+      }
+
+      sprintf(buf,"SW=%d,%d,%d,%d,%d", shutter_open, shutter_close, cycle_start, cycle_stop, spare_button);
+      LCD_Command(LINE_1);               // goto lcd line 1
+      LCDprint(buf);
+    }
 
     /* Get current time and see if we must re-display it.  */
     ntime = timer_get_ticks ();
