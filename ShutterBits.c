@@ -81,6 +81,8 @@ unsigned long timer_count;
 unsigned long boot_time;
 
 unsigned short shutter_open;
+unsigned short on_count;
+unsigned short off_count;
 
 void LCD_Command(unsigned char cval);
 void LCD_busy(void);
@@ -261,17 +263,15 @@ static void display_time (unsigned long ntime)
 	  
 	  if (shutter_open)
 	  {
-      // Open the shutter.
-      _io_ports[M6811_PORTA] |= PA5;
-      _io_ports[M6811_PORTA] &= ~PA4;
+      // If the shutter is opened, close the shutter.
       shutter_open = 0;
+      off_count = 0;
 	  }
 	  else
 	  {
-      // Close the shutter.
-      _io_ports[M6811_PORTA] |= PA4;
-      _io_ports[M6811_PORTA] &= ~PA5;
+      // Otherwise, open the shutter.
 	    shutter_open = 1;
+      on_count = 0;
 	  }
 
     // Write the time out to the LCD display.
@@ -296,6 +296,39 @@ static void display_time (unsigned long ntime)
     buf[1] = 0;
     serial_print ("\b");
     serial_print (buf);
+    
+	  if (shutter_open)
+	  {
+      if (on_count < 1)
+      {
+        // Open the shutter.
+        _io_ports[M6811_PORTA] &= ~PA4;
+        _io_ports[M6811_PORTA] |= PA5;
+      }
+      else
+      {
+        // Bring the H-bridge driver back into the idle state.
+        _io_ports[M6811_PORTA] &= ~PA4;
+        _io_ports[M6811_PORTA] &= ~PA5;
+      }
+      on_count++;
+    }
+    else
+    {
+      if (off_count < 1)
+      {
+        // Close the shutter.
+        _io_ports[M6811_PORTA] |= PA4;
+        _io_ports[M6811_PORTA] &= ~PA5;
+      }
+      else
+      {
+        // Bring the H-bridge driver back into the idle state.
+        _io_ports[M6811_PORTA] &= ~PA4;
+        _io_ports[M6811_PORTA] &= ~PA5;
+      }
+      off_count++;
+    }
   }
   serial_flush ();
 }
@@ -364,10 +397,10 @@ int main ()
   LCD_Command(LINE_1);               // goto lcd line 1
   LCDprint("Hello, world!");
 
-  /* Ask for the boot time.  */
-  get_time ();
-  
+  // Open the shutter to start with and initialize the counters to zero.
   shutter_open = 1;
+  on_count = 0;
+  off_count = 0;
 
   /* Loop waiting for the time to change and redisplay it.  */
   while (1)
