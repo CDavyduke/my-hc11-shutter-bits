@@ -87,8 +87,10 @@ unsigned long timer_count;
 unsigned long boot_time;
 
 // Some shutter-related flags and counters.
-unsigned short shutter_open;
-unsigned short shutter_close;
+unsigned short shutter_opened;
+unsigned short shutter_closed;
+unsigned short open_shutter;
+unsigned short close_shutter;
 unsigned short on_count;
 unsigned short off_count;
 
@@ -288,60 +290,84 @@ static void display_time(unsigned long ntime)
   {
     last_us = nus;
 
-	  // If the shutter open flag has been set, turn on the appropriate half of the H-bridge driver
-	  // for the desired number of milliseconds.
-	  if(shutter_open)
+	  // If the open shutter flag has been set and the shutter is not already in the opened position,
+	  // turn on the appropriate half of the H-bridge driver for the desired number of milliseconds.
+	  if(open_shutter)
 	  {
-      if(on_count < 1)
-      {
-        // Open the shutter.
-        _io_ports[M6811_PORTA] &= ~PA4;
-        _io_ports[M6811_PORTA] |= PA5;
+      // If the user is requesting that the shutter be opened, then we must be moving away from the
+      // shutter closed position.
+      shutter_closed = 0;
 
-        // Increase the counter to indicate the number of ms the pulse has been asserted.
-        on_count++;
-      }
-      else
+      // If the shutter is not already opened, then enabled the open pulse for the desired pulse duration.
+      if(!shutter_opened)
       {
-        // Bring the H-bridge driver back into the idle state.
-        _io_ports[M6811_PORTA] &= ~PA4;
-        _io_ports[M6811_PORTA] &= ~PA5;
+        // If the duration is still not yet acheived, keep the pulse on.
+        if(on_count < 1)
+        {
+          // Open the shutter.
+          _io_ports[M6811_PORTA] &= ~PA4;
+          _io_ports[M6811_PORTA] |= PA5;
 
-        // After the pulse has been on for the desired amount of time, remove the shutter open flag
-        // and reset the pulse delay counter.
-        shutter_open = 0;
-        on_count = 0;
+          // Increase the counter to indicate the number of ms the pulse has been asserted.
+          on_count++;
+        }
+
+        // If the pulse has been on for the required number of ms, put the H-bridge back into idle.
+        else
+        {
+          // Bring the H-bridge driver back into the idle state.
+          _io_ports[M6811_PORTA] &= ~PA4;
+          _io_ports[M6811_PORTA] &= ~PA5;
+
+          // After the pulse has been on for the desired amount of time, remove the shutter open flag,
+          // reset the pulse delay counter, and signal that the shutter is now opened.
+          open_shutter = 0;
+          on_count = 0;
+          shutter_opened = 1;
+        }
       }
     }
 
-	  // If the shutter close flag has been set, turn on the appropriate half of the H-bridge driver
-	  // for the desired number of milliseconds.
-    if(shutter_close)
+	  // If the close shutter flag has been set and the shutter is not already in the closed position,
+	  // turn on the appropriate half of the H-bridge driver for the desired number of milliseconds.
+    if(close_shutter)
     {
-      if(off_count < 1)
-      {
-        // Close the shutter.
-        _io_ports[M6811_PORTA] |= PA4;
-        _io_ports[M6811_PORTA] &= ~PA5;
+      // If the user is requesting that the shutter be closed, then we must be transitioning from the
+      // shutter opened position.
+      shutter_opened = 0;
 
-        // Increase the counter to indicate the number of ms the pulse has been asserted.
-        off_count++;
-      }
-      else
+      // If the shutter is not already closed, then enable the close pulse for the desired pulse duration.
+      if(!shutter_closed)
       {
-        // Bring the H-bridge driver back into the idle state.
-        _io_ports[M6811_PORTA] &= ~PA4;
-        _io_ports[M6811_PORTA] &= ~PA5;
+        // If the duration is still not yet acheived, keep the pulse on.
+        if(off_count < 1)
+        {
+          // Close the shutter.
+          _io_ports[M6811_PORTA] |= PA4;
+          _io_ports[M6811_PORTA] &= ~PA5;
 
-        // After the pulse has been on for the desired amount of time, remove the shutter close flag
-        // and reset the pulse delay counter.
-        shutter_close = 0;
-        off_count = 0;
+          // Increase the counter to indicate the number of ms the pulse has been asserted.
+          off_count++;
+        }
+
+        // If the pulse has been on for the required number of ms, put the H-bridge back into idle.
+        else
+        {
+          // Bring the H-bridge driver back into the idle state.
+          _io_ports[M6811_PORTA] &= ~PA4;
+          _io_ports[M6811_PORTA] &= ~PA5;
+
+          // After the pulse has been on for the desired amount of time, remove the close shutter flag,
+          // reset the pulse delay counter, and signal that the shutter is now closed.
+          close_shutter = 0;
+          off_count = 0;
+          shutter_closed = 1;
+        }
       }
     }
 
     // Display the flags and counters for diagnostic purposes.
-    sprintf(buf3, "f=%d,%d,c=%d,%d", shutter_open, shutter_close, on_count, off_count);
+    sprintf(buf3, "f=%d,%d,c=%d,%d", open_shutter, close_shutter, on_count, off_count);
     LCD_Command(LINE_4);               // goto lcd line 4
     LCDprint(buf3);
   }
@@ -412,8 +438,10 @@ int main()
   timer_count = 0;
 
   // Set the shutter flags and counters to zero to start off with.
-  shutter_open = 0;
-  shutter_close = 0;
+  shutter_opened = 0;
+  shutter_closed = 0;
+  open_shutter = 0;
+  close_shutter = 0;
   on_count = 0;
   off_count = 0;
 
@@ -452,19 +480,19 @@ int main()
     if(buttons)
     {
       button_open = buttons & PA0;
-      button_close = (buttons & PA1) >> 1;
+      button_close = buttons & PA1;
 
       // If the shutter open button has been pressed, assert the shutter open flag.
       if(button_open)
       {
-        shutter_open = 1;
+        open_shutter = 1;
         button_open_count++;
       }
 
       // If the shutter close button has been pressed, assert the shutter close flag.
       if(button_close)
       {
-        shutter_close = 1;
+        close_shutter = 1;
         button_close_count++;
       }
     }
