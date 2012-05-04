@@ -283,14 +283,10 @@ static void display_time(unsigned long ntime)
     LCDprint(buf2);
   }
 
-  // Only re-display the tenths of a second.
+  // Do this stuff every tenth of a second.
   else if(last_us != nus)
   {
     last_us = nus;
-    buf[0] = '0' + nus;
-    buf[1] = 0;
-    serial_print("\b");
-    serial_print(buf);
 
 	  // If the shutter open flag has been set, turn on the appropriate half of the H-bridge driver
 	  // for the desired number of milliseconds.
@@ -349,6 +345,7 @@ static void display_time(unsigned long ntime)
     LCD_Command(LINE_4);               // goto lcd line 4
     LCDprint(buf3);
   }
+
   serial_flush();
 }
 
@@ -395,7 +392,7 @@ void LCDprint(char *sptr)
 unsigned short ButtonPressed(void)
 {
   unsigned short buttons = 0;
-  buttons = _io_ports[M6811_PORTA] & 0x0F;
+  buttons = _io_ports[M6811_PORTA] & 0x03;
   return buttons;
 }
 
@@ -405,6 +402,8 @@ int main()
   unsigned short buttons = 0;
   unsigned short button_open = 0;
   unsigned short button_close = 0;
+  unsigned short button_open_count = 0;
+  unsigned short button_close_count = 0;
   char buf[8];
 
   serial_init();
@@ -431,7 +430,7 @@ int main()
   LCD_Initialize();
 
   // Print the "welcome" message out the serial port and on the LCD.
-//  print ("\nHello, world!\n");
+  print("\nHello, world!\n");
 //  LCD_Command(LINE_1);               // goto lcd line 1
 //  LCDprint("Hello, world!");
 
@@ -453,25 +452,27 @@ int main()
     if(buttons)
     {
       button_open = buttons & PA0;
-      button_close = buttons & PA1;
+      button_close = (buttons & PA1) >> 1;
 
       // If the shutter open button has been pressed, assert the shutter open flag.
       if(button_open)
       {
         shutter_open = 1;
+        button_open_count++;
       }
 
       // If the shutter close button has been pressed, assert the shutter close flag.
       if(button_close)
       {
         shutter_close = 1;
+        button_close_count++;
       }
-
-      // Display the buttons for diagnostic purposes.
-      sprintf(buf,"b=%d,%d", button_open, button_close);
-      LCD_Command(LINE_1);               // goto lcd line 1
-      LCDprint(buf);
     }
+
+    // Display the buttons for diagnostic purposes.
+    sprintf(buf,"b=%d,%d,%d,%d", button_open, button_open_count, button_close, button_close_count);
+    LCD_Command(LINE_1);               // goto lcd line 1
+    LCDprint(buf);
 
     // Get current time and see if we must re-display it.
     ntime = timer_get_ticks();
