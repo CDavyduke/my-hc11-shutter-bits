@@ -1,0 +1,1 @@
+These bits will eventually control one-half of an H-bridge driver for a shutter motor.
